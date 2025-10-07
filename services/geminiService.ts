@@ -1,86 +1,129 @@
-
-import type { AnalysisResult, Vulnerability } from '../types';
+import { GoogleGenAI, Type } from "@google/genai";
+import type { AnalysisResult } from '../types';
 import { Severity } from '../types';
 
-// This is a mock service. In a real application, you would use @google/genai.
-// import { GoogleGenAI } from "@google/genai";
-// const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-const mockVulnerabilities: Vulnerability[] = [
-  {
-    id: 'vuln-1',
-    severity: Severity.Critical,
-    location: 'auth/login.js:42',
-    description: 'Injeção SQL potencial no método \'loginUser\'.',
-    cve: 'CVE-2021-44228',
-    remediation: 'Utilize prepared statements e ORMs para evitar a concatenação direta de strings em queries SQL. Valide e sanitize todas as entradas do usuário.',
-  },
-  {
-    id: 'vuln-2',
-    severity: Severity.High,
-    location: 'api/userController.js:101',
-    description: 'Cross-Site Scripting (XSS) em campo de perfil de usuário.',
-    cve: 'CVE-2022-29072',
-    remediation: 'Implemente a codificação de saída (output encoding) para todos os dados dinâmicos renderizados na UI. Use uma biblioteca como DOMPurify no frontend.',
-  },
-  {
-    id: 'vuln-3',
-    severity: Severity.Medium,
-    location: 'package.json',
-    description: 'Dependência "express" desatualizada (v4.17.1).',
-    remediation: 'Atualize o pacote para a versão mais recente para corrigir vulnerabilidades conhecidas. Execute `npm update express`.',
-  },
-    {
-    id: 'vuln-4',
-    severity: Severity.Low,
-    location: 'config/cors.js:8',
-    description: 'Configuração de CORS excessivamente permissiva.',
-    remediation: 'Restrinja a política de CORS para permitir apenas origens confiáveis e específicas em vez de usar um curinga (*).',
-  },
-    {
-    id: 'vuln-5',
-    severity: Severity.Medium,
-    location: 'utils/fileUpload.js:25',
-    description: 'Validação de tipo de arquivo inadequada.',
-    remediation: 'Valide o tipo MIME do arquivo no servidor, não confie apenas na extensão do arquivo fornecida pelo cliente.',
-  },
-];
-
-export const generateAnalysisResult = (systemPrompt?: string): AnalysisResult => {
-  // This function simulates a Gemini API call that would analyze code and return structured data.
-  // In a real implementation, the systemPrompt would be used like this:
-  /*
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: 'Analyze this code...',
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: "application/json",
-      // responseSchema for AnalysisResult would be defined here
-    },
-  });
-  // return JSON.parse(response.text);
-  */
-
-  const critical = mockVulnerabilities.filter(v => v.severity === Severity.Critical).length;
-  const high = mockVulnerabilities.filter(v => v.severity === Severity.High).length;
-  const medium = mockVulnerabilities.filter(v => v.severity === Severity.Medium).length;
-  const low = mockVulnerabilities.filter(v => v.severity === Severity.Low).length;
-
-  return {
+const analysisResultSchema = {
+  type: Type.OBJECT,
+  properties: {
     summary: {
-      critical,
-      high,
-      medium,
-      low,
-      securityScore: 7,
-      aiSummary: "Olá! Sua análise foi concluída. Encontramos 1 vulnerabilidade crítica e 1 de alta severidade. O foco principal deve ser a correção da Injeção SQL no módulo de autenticação.",
+      type: Type.OBJECT,
+      properties: {
+        critical: { type: Type.INTEGER, description: "Número de vulnerabilidades críticas." },
+        high: { type: Type.INTEGER, description: "Número de vulnerabilidades de alta severidade." },
+        medium: { type: Type.INTEGER, description: "Número de vulnerabilidades de média severidade." },
+        low: { type: Type.INTEGER, description: "Número de vulnerabilidades de baixa severidade." },
+        securityScore: { type: Type.INTEGER, description: "Pontuação de segurança geral de 0 a 10." },
+        aiSummary: { type: Type.STRING, description: "Um resumo conciso gerado pela IA sobre a postura de segurança do código." },
+      },
+      required: ['critical', 'high', 'medium', 'low', 'securityScore', 'aiSummary'],
     },
-    vulnerabilities: mockVulnerabilities,
-    recommendations: [
-      'Implementar um pipeline de CI/CD com verificação de segurança automatizada.',
-      'Revisar as políticas de gerenciamento de senhas para usuários.',
-      'Realizar treinamentos de segurança para a equipe de desenvolvimento.',
-    ],
-  };
+    vulnerabilities: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING, description: "Um identificador único para a vulnerabilidade, ex: 'vuln-1'." },
+          severity: { type: Type.STRING, description: "A severidade da vulnerabilidade (Critical, High, Medium, Low)." },
+          location: { type: Type.STRING, description: "O arquivo e linha onde a vulnerabilidade foi encontrada, ex: 'auth/login.js:42'." },
+          description: { type: Type.STRING, description: "Uma descrição clara e concisa da vulnerabilidade." },
+          cve: { type: Type.STRING, description: "O identificador CVE, se aplicável." },
+          remediation: { type: Type.STRING, description: "Uma sugestão detalhada de como corrigir a vulnerabilidade." },
+        },
+        required: ['id', 'severity', 'location', 'description', 'remediation'],
+      },
+    },
+    recommendations: {
+      type: Type.ARRAY,
+      description: "Uma lista de recomendações estratégicas de alto nível.",
+      items: {
+        type: Type.STRING,
+      },
+    },
+  },
+  required: ['summary', 'vulnerabilities', 'recommendations'],
+};
+
+
+export const generateAnalysisResult = async (code: string, systemPrompt: string, apiKey: string): Promise<AnalysisResult> => {
+  if (!apiKey) {
+    throw new Error("API Key não fornecida.");
+  }
+  
+  const ai = new GoogleGenAI({ apiKey });
+
+  const model = "gemini-2.5-flash";
+  const userPrompt = `
+    Por favor, analise o seguinte código-fonte para vulnerabilidades de segurança.
+    Fornesça a resposta estritamente no formato JSON definido.
+
+    Código para analisar:
+    ---
+    ${code}
+    ---
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: analysisResultSchema,
+      },
+    });
+    
+    const jsonText = response.text.trim();
+    const result = JSON.parse(jsonText) as AnalysisResult;
+    
+    // Ensure all severities are valid enum values
+    result.vulnerabilities = result.vulnerabilities.map(v => ({
+        ...v,
+        severity: Object.values(Severity).includes(v.severity) ? v.severity : Severity.Medium,
+    }));
+    
+    return result;
+
+  } catch (error) {
+    console.error("Erro ao chamar a API Gemini:", error);
+    if (error instanceof Error) {
+        if (error.message.includes('API key not valid')) {
+            throw new Error("Chave de API inválida. Por favor, verifique sua chave nas configurações.");
+        }
+    }
+    throw new Error("Não foi possível obter a análise da IA.");
+  }
+};
+
+export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+  if (!apiKey) {
+    return false;
+  }
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    // This validation call is now structured to be very similar to the main analysis call.
+    // By requesting a JSON response with a schema, we force a more comprehensive
+    // check on the API key's validity and permissions, making it much more reliable.
+    await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: "Validate this key.",
+      config: {
+        systemInstruction: "You are a key validator. Respond with a simple JSON object.",
+        responseMimeType: "application/json",
+        responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+                status: { type: Type.STRING }
+            },
+            required: ['status']
+        }
+      }
+    });
+    return true;
+  } catch (error) {
+    console.error("API Key validation failed:", error);
+    // Any error during this more stringent check indicates an invalid or unusable key.
+    // The Gemini API typically throws specific errors for invalid keys, which will be caught here.
+    return false;
+  }
 };

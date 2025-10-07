@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -30,14 +29,20 @@ const App: React.FC = () => {
   const [systemPrompt, setSystemPrompt] = useState<string>(
     () => localStorage.getItem('systemPrompt') || DEFAULT_SYSTEM_PROMPT
   );
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('apiKey') || '');
 
   useEffect(() => {
     localStorage.setItem('systemPrompt', systemPrompt);
   }, [systemPrompt]);
 
+  useEffect(() => {
+    localStorage.setItem('apiKey', apiKey);
+  }, [apiKey]);
+
+
   const handleStartAnalysis = useCallback((files: FileList) => {
-    startAnalysis(files, systemPrompt);
-  }, [startAnalysis, systemPrompt]);
+    startAnalysis(files, systemPrompt, apiKey);
+  }, [startAnalysis, systemPrompt, apiKey]);
 
   const handleNavigate = (view: View) => {
     if (analysisStatus !== 'Analyzing') {
@@ -61,7 +66,7 @@ const App: React.FC = () => {
       case 'Relatórios':
         return <Reports />;
       case 'Configurações':
-        return <Settings systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} defaultPrompt={DEFAULT_SYSTEM_PROMPT} />;
+        return <Settings systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} defaultPrompt={DEFAULT_SYSTEM_PROMPT} apiKey={apiKey} setApiKey={setApiKey} />;
       case 'Histórico':
         return <History />;
       default:
@@ -78,7 +83,7 @@ const App: React.FC = () => {
           {renderContent()}
         </main>
       </div>
-      <AIChat isOpen={isChatOpen} onClose={() => setChatOpen(false)} />
+      <AIChat isOpen={isChatOpen} onClose={() => setChatOpen(false)} apiKey={apiKey} />
     </div>
   );
 };
